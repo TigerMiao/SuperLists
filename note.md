@@ -591,3 +591,117 @@ functional_tests.py
     git diff # 会显示对functional_tests.py的改动
     git commit -am "Functional test now checks we can input a to-do item"
 
+## 2. 遵守“不测试常量”规则，使用模板解决这个问题
+一般来说，单元测试的规则之一是“不测试常量”。以文本形式测试 HTML 很大程度上就是测试常量。
+
+单元测试要测试的其实是逻辑、流程控制和配置。编写断言检测 HTML 字符串中是否有指定的字符序列，不是单元测试应该做的。
+
+而且，在 Python 代码中插入原始字符串真的不是处理 HTML 的正确方式。我们有更好的方法，那就是使用模板。
+
+### 使用模板重构
+先把 HTML 字符串提取出来写入单独的文件。新建用于保存模板的文件夹 lists/templates/lists，然后新建文件 lists/templates/home.html，再把 HTML 写入这个文件。
+
+lists/templates/lists/home.html
+
+    <html>
+        <title>To-Do lists</title>
+    </html>
+
+接下来修改视图函数:
+
+lists/views.py
+
+    from django.shortcuts import render
+        def home_page(request):
+            return render(request, 'lists/home.html')
+
+
+现在不自己构建 HttpResponse 对象了，转而使用 Django 中的 render 函数。这个函数的第一个参数是请求对象，第二个参数是渲染的模板名。
+
+运行测试，测试失败，测试无法找到模板。原因是还没有正式在 Django 中注册 lists 应用。打开 settings.py，找到变量 INSTALLED_APPS，把 lists 加进去:
+
+superlists/settings.py
+
+    # Application definition
+    INSTALLED_APPS = (
+        'django.contrib.admin',
+        'django.contrib.auth',
+        'django.contrib.contenttypes',
+        'django.contrib.sessions',
+        'django.contrib.messages',
+        'django.contrib.staticfiles',
+        'lists',
+    )
+
+再次运行测试，还是无法通过。原因是转用模板后在响应的末尾引入了一个额外的空行(\n)。按下面的方式修改可以让测试通过:
+
+lists/tests.py
+
+    self.assertTrue(html.strip().endswith('</html>'))
+
+再次运行测试，测试通过。
+
+### Django测试客户端
+现在可以修改测试，不再测试 常量，检查是否渲染了正确的模板。
+
+一种方法是在测试中手动渲染模板，然后和视图返回内容进行比较。Django中有个函数叫 render_to_string 可以提供帮助：
+
+lists/tests.py
+
+    from django.template.loader import render_to_string 
+    [...]
+
+    def test_home_page_returns_correct_html(self): 
+        request = HttpRequest()
+        response = home_page(request)
+        html = response.content.decode('utf8') 
+        expected_html = render_to_string('home.html') 
+        self.assertEqual(html, expected_html)
+
+第二种方法，Django提供了一个测试客户端，其中有用于测试模板的工具。
+
+lists/tests.py
+
+    def test_home_page_returns_correct_html(self): 
+        response = self.client.get('/')
+
+        html = response.content.decode('utf8')
+        self.assertTrue(html.startswith('<html>'))
+        self.assertIn('<title>To-Do lists</title>', html)
+        self.assertTrue(html.strip().endswith('</html>'))
+
+        self.assertTemplateUsed(response, 'home.html')
+    
+* 不是手动创建 HttpResponse 对象，而是直接调用视图函数。我们调用的是 self.client.get，然后把要测试的 URL 传递给它。
+
+* 我们现在把旧的测试留在那里，只是为了确保一切都是按照我们的想法进行。
+
+* .assertTemplateUsed 是 Django TestCase 类给我们提供的测试方法。它让我们检查使用什么模板来渲染响应，它只对测试客户端检索的响应起作用。
+
+运行测试，测试通过。
+
+现在可以把旧的断言删掉了。我们也可以删掉旧的 test_root_url_resolves_to_home_page_view 测试，因为 Django 测试客户端已经隐含的对它进行了测试。
+
+提交代码：
+
+    git status # 会看到tests.py，views.py，settings.py，以及新建的templates文件夹 git add . # 还会添加尚未跟踪的templates文件夹
+    git diff --staged # 审查我们想提交的内容
+    git commit -m"Refactor home page view to use a template"
+
+## 3. 修改首页
+修改模板让功能测试通过：
+
+lists/templates/lists/home.html
+
+    <html>
+        <head>
+            <title>To-Do lists</title>
+        </head>
+
+        <body>
+            <h1>Your To-Do list</h1>
+            <input id="id_new_item" placeholder="Enter a to-do item" />
+            <table id="id_list_table">
+            </table>
+        </body>
+    </html>
