@@ -266,3 +266,223 @@ lists/tests.py
     git diff --staged # 会显示将要提交的内容差异
     git commit -m"Add app for lists, with deliberately failing unit test"
 
+## 4. Django中的MVC、URL和视图函数
+总的来说，Django 遵守了经典的“模型 - 视图 - 控制器”(Model-View-Controller，MVC) 模式，但并没严格遵守。Django 确实有模型，但视图更像是控制器，模板其实才是视图。可以参考 Django [常见问题解答](https://docs.djangoproject.com/en/1.7/faq/general/)中的详细说明。
+
+抛开这些，Django 和任何一种 Web 服务器一样，其主要任务是决定用户访问网站中的某 个 URL 时做些什么。Django 的工作流程有点儿类似下述过程:
+
+(1) 针对某个 URL 的 HTTP 请求进入;
+
+(2) Django 使用一些规则决定由哪个视图函数处理这个请求(这一步叫作解析 URL); 
+
+(3) 选中的视图函数处理请求，然后返回 HTTP 响应。
+
+因此要测试两件事情：
+
+* 能否解析网站根路径(“/”)的 URL，将其对应到我们编写的某个视图函数上?
+* 能否让视图函数返回一些 HTML，让功能测试通过?
+
+先编写第一个单元测试。打开 lists/tests.py，把之前编写的冒烟测试改成如下代码:
+
+lists/tests.py
+
+    from django.urls import resolve 
+    from django.test import TestCase
+    from lists.views import home_page #➊
+
+    class HomePageTest(TestCase):
+    
+        def test_root_url_resolves_to_home_page_view(self): 
+            found = resolve('/') #➋ 
+            self.assertEqual(found.func, home_page) #➌
+
+这段代码的意思是：
+
+➊ 这是接下来要定义的视图函数，其作用是返回所需的 HTML。从
+import 语句可以看出，要把这个函数保存在文件 lists/views.py 中。
+
+➋ ➌ resolve 是 Django 内部使用的函数，用于解析 URL，并将其映射到相应的视图函数
+上。检查解析网站根路径“/”时，是否能找到名为 home_page 的函数。
+
+运行测试会得到试图导入未定义函数的异常：
+
+    $ python3 manage.py test
+    ImportError: cannot import name 'home_page'
+
+预料之中的异常也算是预期失败。
+
+## 5. 编写应用代码
+使用 TDD 时要耐着性子，步步为营。尤其是学习和起步阶段，一次只能修改(或添加)一行代码。每一次修改的代码要尽量少，让失败的测试通过即可。
+
+在 lists/views.py 中写入下面的代码：
+
+lists/views.py
+
+    from django.shortcuts import render
+    
+    # 在这儿编写视图 
+    home_page = None
+
+再次运行测试：
+
+    python manage.py test
+
+测试失败。失败的原因是尝试解析“/”时，Django抛出了404错误，也即是说，Django无法找到“/”的URL映射。
+
+## 6. urls.py
+Django 在 urls.py 文件中定义如何把 URL 映射到视图函数上。修改 superlists/urls.py文件：
+
+superlists/urls.py
+
+    from django.contrib import admin
+    from django.urls import path
+    from lists import views
+
+    urlpatterns = [
+        path('admin/', admin.site.urls),
+        path('', views.home_page, name='home')
+    ]
+
+然后再次运行测试:
+
+    django.core.exceptions.ViewDoesNotExist: Could not import
+    lists.views.home_page. View is not callable.
+
+单元测试把地址“/”和文件 lists/views.py 中的 home_page = None 连接起来了，现在测试抱 怨 home_page 无法调用，即不是函数。修改文件 lists/views.py，把 home_page 从None变成真正的函数。
+
+lists/views.py
+
+    from django.shortcuts import render
+
+    # 在这儿编写视图 
+    def home_page():
+        pass
+
+再次运行测试，测试通过。
+
+提交代码：
+
+    git diff # 会显示urls.py、tests.py和views.py中的变动
+    git commit -am"First unit test and url mapping, dummy view"
+
+把 a 和 m 标志放在一起使用，意思是添加所有已跟踪文件中的改动，而且使用命令行中输入的提交消息。
+
+## 7. 为视图编写单元测试
+打开 lists/tests.py，添加一个新测试方法：
+
+lists/tests.py
+
+    from django.urls import resolve 
+    from django.test import TestCase 
+    from django.http import HttpRequest
+
+    from lists.views import home_page 
+
+    class HomePageTest(TestCase):
+
+        def test_root_url_resolves_to_home_page_view(self): 
+            found = resolve('/') 
+            self.assertEqual(found.func, home_page)
+
+        def test_home_page_returns_correct_html(self): 
+            request = HttpRequest()
+            response = home_page(request)
+            html = response.content.decode('utf8') 
+            self.assertTrue(html.startswith('<html>')) 
+            self.assertIn('<title>To-Do lists</title>', html) 
+            self.assertTrue(html.endswith('</html>'))
+
+
+* 创建了一个 HttpRequest 对象，用户在浏览器中请求网页时，Django 看到的就是
+HttpRequest 对象。
+
+* 把这个 HttpRequest 对象传给 home_page 视图，得到响应。
+
+* 接着，我们提取响应中的 .content。这些是原始字节，将被发送到用户浏览器的1和0。我们调用 .decode() 把它们转换成 HTML 字符串。
+
+* 希望响应以 `<html>` 标签开头，并在结尾处关闭该标签。
+
+* 希望响应中有一个 `<title>` 标签，其内容包含单词“To-Do”——因为在功能测试中
+做了这项测试。
+
+## “单元测试/编写代码”循环
+(1) 在终端里运行单元测试，看它们是如何失败的;
+
+(2) 在编辑器中改动最少量的代码，让当前失败的测试通过。 
+
+然后不断重复。
+
+想保证编写的代码无误，每次改动的幅度就要尽量小。这么做才能确保每一部分代码都有 对应的测试监护。乍看起来工作量很大，但熟练后速度还是很快的。
+
+* 小幅代码改动:
+
+lists/views.py
+
+    def home_page(request):
+        pass
+
+* 运行测试:
+
+    self.assertTrue(response.content.startswith(b'<html>'))
+    AttributeError: 'NoneType' object has no attribute 'content'
+
+* 编写代码:
+
+lists/views.py
+
+    from django.http import HttpResponse
+    # 在这儿编写视图
+    def home_page(request):
+        return HttpResponse()
+
+* 再运行测试:
+
+    self.assertTrue(response.content.startswith(b'<html>'))
+    AssertionError: False is not true
+
+* 再编写代码:
+
+lists/views.py
+
+    def home_page(request):
+        return HttpResponse('<html>')
+
+* 运行测试:
+
+    AssertionError: b'<title>To-Do lists</title>' not found in b'<html>'
+
+* 编写代码:
+
+lists/views.py
+
+    def home_page(request):
+        return HttpResponse('<html><title>To-Do lists</title>')
+
+* 运行测试:
+
+    self.assertTrue(response.content.endswith(b'</html>'))
+    AssertionError: False is not true
+
+* 最后一击:
+
+    def home_page(request):
+        return HttpResponse('<html><title>To-Do lists</title></html>')
+
+* 运行测试：
+
+    python manage.py test
+
+测试通过。
+
+运行功能测试：
+
+    python3 functional_tests.py
+
+测试通过。
+
+提交代码：
+
+    git diff # 会显示tests.py中的新测试方法，以及views.py中的视图
+    git commit -am"Basic view now returns minimal HTML"
+    
+    git log --oneline
