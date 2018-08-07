@@ -7,7 +7,7 @@ from lists.views import home_page
 
 class HomePageTest(TestCase):
 
-    def test_home_page_return_correct_html(self):
+    def test_use_home_template(self):
         '''
         # 手动渲染模板进行测试
         request = HttpRequest()
@@ -20,3 +20,9 @@ class HomePageTest(TestCase):
         # 使用 Django 测试客户端进行测试
         response = self.client.get('/')
         self.assertTemplateUsed(response, 'lists/home.html')
+
+    def test_can_save_a_POST_request(self):
+        response = self.client.post('/', data={'item_text': 'A new list item'})
+        self.assertIn('A new list item', response.content.decode())
+        self.assertTemplateUsed(response, 'lists/home.html')
+

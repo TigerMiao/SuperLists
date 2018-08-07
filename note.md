@@ -655,7 +655,7 @@ lists/tests.py
         request = HttpRequest()
         response = home_page(request)
         html = response.content.decode('utf8') 
-        expected_html = render_to_string('home.html') 
+        expected_html = render_to_string('lists/home.html') 
         self.assertEqual(html, expected_html)
 
 第二种方法，Django提供了一个测试客户端，其中有用于测试模板的工具。
@@ -670,7 +670,7 @@ lists/tests.py
         self.assertIn('<title>To-Do lists</title>', html)
         self.assertTrue(html.strip().endswith('</html>'))
 
-        self.assertTemplateUsed(response, 'home.html')
+        self.assertTemplateUsed(response, 'lists/home.html')
     
 * 不是手动创建 HttpResponse 对象，而是直接调用视图函数。我们调用的是 self.client.get，然后把要测试的 URL 传递给它。
 
@@ -681,6 +681,12 @@ lists/tests.py
 运行测试，测试通过。
 
 现在可以把旧的断言删掉了。我们也可以删掉旧的 test_root_url_resolves_to_home_page_view 测试，因为 Django 测试客户端已经隐含的对它进行了测试。
+
+lists/tests.py
+
+    def test_home_page_returns_correct_html(self): 
+        response = self.client.get('/')
+        self.assertTemplateUsed(response, 'lists/home.html')
 
 提交代码：
 
@@ -705,3 +711,261 @@ lists/templates/lists/home.html
             </table>
         </body>
     </html>
+
+提交代码：
+
+    git diff
+    git commit -am"Front page HTML now generated from a template"
+
+# 五、保存用户输入
+## 1. 编写表单，发送POST请求
+若想让浏览器发送 POST 请求，要给 <input> 元素指定 name= 属性，然后把它放在 <form> 标签中，并为 <form> 标签指定 method="POST" 属性，这样浏览器才能向服务器发送 POST 请求。调整一下 lists/templates/lists/home.html 中的模板:
+
+lists/templates/lists/home.html
+
+    <h1>Your To-Do list</h1> 
+    <form method="POST">
+        <input name="item_text" id="id_new_item" placeholder="Enter a to-do item" /> 
+    </form>
+    <table id="id_list_table">
+
+现在运行功能测试，会看到一个晦涩难懂、预料之外的错误.
+
+如果功能测试出乎意料地失败了，可以做下面几件事，找出问题所在:
+* 添加 print 语句，输出页面中当前显示的文本是什么; 
+* 改进错误消息，显示当前状态的更多信息;
+* 亲自手动访问网站;
+* 在测试执行过程中使用 time.sleep 暂停。
+
+在错误发生位置的前面加上 time.sleep:
+
+functional_tests.py
+
+    # 按回车键后，页面更新了
+    # 待办事项表格中显示了"1: Buy peacock feathers" inputbox.send_keys(Keys.ENTER)
+    import time
+    time.sleep(10)
+    table = self.browser.find_element_by_id('id_list_table')
+
+再次运行功能测试，显示有 CSRF（跨站请求伪造）错误。Django 针对 CSRF 的保护措施是在生成的每个表单中放置一个自动生成的令牌，通过这个令牌判断 POST 请求是否来自同一个网站。
+
+使用“模板标签” (template tag)添加 CSRF 令牌。模板标签的句法是花括号和百分号形式，即 {% ... %}。
+
+lists/templates/lists/home.html
+
+    <form method="POST">
+        <input name="item_text" id="id_new_item" placeholder="Enter a to-do item" />
+        {% csrf_token %}
+    </form>
+
+渲染模板时，Django 会把这个模板标签替换成一个 <input type="hidden"> 元素，其值是
+CSRF 令牌。现在运行功能测试，会看到一个预期失败:
+
+    AssertionError: False is not true : New to-do item did not appear in table
+
+可以看到，提交表单后新添加的 待办事项不见了，页面刷新后又显示了一个空表单。这是因为还没连接服务器让它处理 POST 请求，所以服务器忽略请求，直接显示常规首页。
+
+其实，现在可以缩短 time.sleep 的时间了:
+
+functional_tests.py
+
+    # 待办事项表格中显示了“1: Buy peacock feathers”
+    inputbox.send_keys(Keys.ENTER)
+
+    import time
+    time.sleep(1)
+
+    table = self.browser.find_element_by_id('id_list_table')
+
+## 2. 在服务器中处理POST请求
+还没为表单指定 action= 属性，因此提交表单后默认返回之前渲染的页面，即“/”，这个
+页面由视图函数 home_page 处理。
+
+打开文件 lists/tests.py，在 HomePageTest 类中添加一个新方法：
+
+lists/tests.py
+
+    def test_uses_home_template(self):
+        response = self.client.get('/') 
+        self.assertTemplateUsed(response, 'home.html')
+
+    def test_can_save_a_POST_request(self):
+        response = self.client.post('/', data={'item_text': 'A new list item'})
+        self.assertIn('A new list item', response.content.decode())
+
+要实现 POST，我们调用了 self.client.post，并且传递了一个 data 参数，该参数包含了我们想发送的表单数据。然后再检查 POST 请求渲染得到的 HTML 中是否有指定的文本。运行测试后，会看到预期的失败:
+
+    python3 manage.py test
+    [...]
+    AssertionError: 'A new list item' not found in '<html> [...]
+
+为了让测试通过，可以添加一个 if 语句，为 POST 请求提供一个不同的代码执行路径。
+
+    from django.http import HttpResponse 
+    from django.shortcuts import render
+
+    def home_page(request):
+        if request.method == 'POST':
+            return HttpResponse(request.POST['item_text']) 
+        return render(request, 'lists/home.html')
+
+## 3. 把 Python 变量传入模板中渲染
+把 Python 变量传入模板使用的符号是 {{ ... }}：
+
+    <body>
+        <h1>Your To-Do list</h1> 
+        <form method="POST">
+            <input name="item_text" id="id_new_item" placeholder="Enter a to-do item" />
+            {% csrf_token %}
+        </form>
+
+        <table id="id_list_table">
+            <tr><td>{{ new_item_text }}</td></tr>
+        </table> 
+    </body>
+
+调整单元测试，以便检查我们是否还在使用模板：
+
+    def test_can_save_a_POST_request(self):
+        response = self.client.post('/', data={'item_text': 'A new list item'})
+        self.assertIn('A new list item', response.content.decode()) 
+        self.assertTemplateUsed(response, 'lists/home.html')
+
+运行测试会产生预期的失败：
+
+    AssertionError: No templates used to render the response
+
+然后重写视图函数，把 POST 请求中的参数传入模板。render 函数使用一个字典把它作为第三个参数，将模板变量名映射到它们的值。
+
+lists/views.py
+
+    def home_page(request):
+        return render(request, 'home.html', {
+            'new_item_text': request.POST['item_text'],
+        })
+
+然后再运行单元测试：
+
+    ERROR: test_home_page_returns_correct_html (lists.tests.HomePageTest)
+    [...]
+        'new_item_text': request.POST['item_text'],
+    KeyError: 'item_text'
+
+看到的是意料之外的失败。
+
+这次失败的修正方法如下:
+
+lists/views.py
+
+    def home_page(request):
+        return render(request, 'home.html', {
+            'new_item_text': request.POST.get('item_text', ''),
+        })
+
+这个单元测试现在应该可以通过了。
+
+错误消息没太大帮助。使用另一种功能测试的调试技术:改进错误消息。
+
+functional_tests.py
+
+    self.assertTrue(
+        any(row.text == '1: Buy peacock feathers' for row in rows),
+        f"New to-do item did not appear in table. Contents were:\n{table.text}"
+    )
+
+你只需要在字符串前加上f，就可以使用大括号语法插入局部变量。
+
+改进后，测试给出了更有用的错误消息:
+
+    AssertionError: False is not true : New to-do item did not appear in table.
+    Contents were:
+    Buy peacock feathers
+
+修改功能测试：
+
+functional_tests.py
+
+    self.assertIn('1: Buy peacock feathers', [row.text for row in rows])
+
+修改模板文件：
+
+lists/templates/lists/home.html
+
+    <tr><td>1: {{ new_item_text }}</td></tr>
+
+现在扩充功能测试，检查表格中添加的第二个待办事项：
+
+functional_tests.py
+
+    # 页面中还有一个文本框，可以输入其他的待办事项
+    # 她输入了“Use peacock feathers to make a fly(”使用孔雀羽毛做假蝇) # 伊迪丝做事很有条理
+    inputbox = self.browser.find_element_by_id('id_new_item') 
+    inputbox.send_keys('Use peacock feathers to make a fly') 
+    inputbox.send_keys(Keys.ENTER)
+
+    # 页面再次更新，清单中显示了这两个待办事项
+    table = self.browser.find_element_by_id('id_list_table')
+    rows = table.find_elements_by_tag_name('tr')
+    self.assertIn('1: Buy peacock feathers', [row.text for row in rows]) 
+    self.assertIn(
+        '2: Use peacock feathers to make a fly',
+        [row.text for row in rows]
+    )
+
+    # 伊迪丝想知道这个网站是否会记住她的清单 
+    # 她看到网站为她生成了一个唯一的URL
+    # 页面中有一些文字解说这个功能 
+    self.fail('Finish the test!')
+
+    # 她访问那个URL，发现待办事项清单还在
+
+这个功能测试会返回一个错误:
+
+    AssertionError: '1: Buy peacock feathers' not found in ['1: Use peacock
+    feathers to make a fly']
+
+## 4. 重构
+提交目前已编写的代码：
+
+    git diff # 会看到functional_tests.py，home.html，tests.py和views.py中的变动
+    git commit -a
+
+在功能测试中定义辅助方法：
+
+functional_tests.py
+
+    def check_for_row_in_list_table(self, row_text):
+        table = self.browser.find_element_by_id('id_list_table')
+        rows = table.find_elements_by_tag_name('tr')
+        self.assertIn(row_text, [row.text for row in rows])
+
+    def test_can_start_a_list_and_retrieve_it_later(self):
+        [...]
+        # 她按回车键后，页面更新了
+        # 待办事项表格中显示了“1: Buy peacock feathers” 
+        inputbox.send_keys(Keys.ENTER) 
+        self.check_for_row_in_list_table('1: Buy peacock feathers')
+
+        # 页面中又显示了一个文本框，可以输入其他的待办事项
+        # 她输入了“Use peacock feathers to make a fly(”使用孔雀羽毛做假蝇) 
+        # 伊迪丝做事很有条理
+        inputbox = self.browser.find_element_by_id('id_new_item') 
+        inputbox.send_keys('Use peacock feathers to make a fly') 
+        inputbox.send_keys(Keys.ENTER)
+
+        # 页面再次更新，她的清单中显示了这两个待办事项 
+        self.check_for_row_in_list_table('1: Buy peacock feathers') 
+        self.check_for_row_in_list_table('2: Use peacock feathers to make a fly')
+
+        # 伊迪丝想知道这个网站是否会记住她的清单 
+        [...]
+
+再次运行功能测试，看重构前后的表现是否一致:
+
+    AssertionError: '1: Buy peacock feathers' not found in ['1: Use peacock
+    feathers to make a fly']
+
+提交这次针对功能测试的重构:
+
+    git diff # 查看functional_tests.py中的改动
+    git commit -a
