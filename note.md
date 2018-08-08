@@ -969,3 +969,97 @@ functional_tests.py
 
     git diff # 查看functional_tests.py中的改动
     git commit -a
+
+## 5. Django ORM
+“对象关系映射器”(Object-Relational Mapper，ORM)是一个数据抽象层，描述存储在数据库中的表、行和列。处理数据库时，可以使用熟悉的面向对象方式，写出更好的代码。 在 ORM 的概念中，类对应数据库中的表，属性对应列，类的单个实例表示数据库中的一行数据。
+
+在 lists/tests.py 文件中新建一个测试类：
+
+lists/tests.py
+
+    from lists.models import Item
+    [...]
+
+    class ItemModelTest(TestCase):
+
+        def test_saving_and_retrieving_items(self):
+            first_item = Item()
+            first_item.text = 'The first (ever) list item'
+            first_item.save()
+
+            second_item = Item()
+            second_item.text = 'Item the second'
+            second_item.save()
+
+            saved_items = Item.objects.all()
+            self.assertEqual(saved_items.count(), 2)
+
+            first_saved_item = saved_items[0]
+            second_saved_item = saved_items[1]
+            self.assertEqual(first_saved_item.text, 'The first (ever) list item')
+            self.assertEqual(second_saved_item.text, 'Item the second')
+
+在数据库中创建新记录的过程很简单:先创建一个对象，再为一些属 性赋值，然后调用 .save() 函数。Django 提供了一个查询数据库的 API，即类属性 .objects。 再使用可能是最简单的查询方法 .all()，取回这个表中的全部记录。得到的结果是一个类 似列表的对象，叫 QuerySet。从这个对象中可以提取出单个对象，然后还可以再调用其他函 数，例如 .count()。接着，检查存储在数据库中的对象，看保存的信息是否正确。
+
+运行单元测试:
+
+    ImportError: cannot import name 'Item'
+
+下面在 lists/models.py 中写入一些代码:
+
+lists/models.py
+
+    from django.db import models
+        class Item(models.Model):
+            pass
+
+### 5.1 第一个数据库迁移
+在 Django 中，ORM 的任务是模型化数据库。创建数据库其实是由另一个系统负责的，叫 作“迁移”(migration)。迁移的任务是，根据你对 models.py 文件的改动情况，添加或删 除表和列。
+
+使用 makemigrations 命令创建迁移:
+
+    python manage.py makemigrations
+
+运行单元测试：
+
+    python manage.py test lists
+    [...]
+        self.assertEqual(first_saved_item.text, 'The first (ever) list item')
+    AttributeError: 'Item' object has no attribute 'text'
+
+测试说明 Item 缺少 .text 属性。
+
+继承 models.Model 的类映射到数据库中的一个表。默认情况下，这种类会得到一个自动生 成的 id 属性，作为表的主键，但是其他列都要自行定义。定义文本字段的方法如下:
+
+lists/models.py
+
+    class Item(models.Model):
+        text = models.TextField()
+
+Django 提供了很多其他字段类型，例如 IntegerField、CharField、DateField 等。使用 TextField 而不用 CharField，是因为后者需要限制长度，但是就目前而言，这个字段的长 度是随意的。
+
+在数据库中添加了一个新字段，就要再创建一个迁移。
+
+    python manage.py makemigrations
+
+这个命令不允许添加没有默认值的列。选择第二个选项，然后在 models.py 中设定一个默 认值。
+
+lists/models.py
+
+    class Item(models.Model):
+        text = models.TextField(default=")
+
+现在可以顺利创建迁移了:
+
+    python manage.py makemigrations
+
+测试也能通过了:
+
+    python manage.py test lists
+
+提交代码：
+
+    git status # 看到tests.py和models.py，以及两个没跟踪的迁移文件 
+    git diff # 审查tests.py和models.py中的改动
+    git add lists
+    git commit -m"Model for list Items and associated migration"
