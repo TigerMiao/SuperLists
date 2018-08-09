@@ -1063,3 +1063,204 @@ lists/models.py
     git diff # 审查tests.py和models.py中的改动
     git add lists
     git commit -m"Model for list Items and associated migration"
+
+## 6. 把 POST 请求中的数据存入数据库
+接下来，要修改针对首页中 POST 请求的测试。希望视图把新添加的待办事项存入数据
+库，而不是直接传给响应。
+
+lists/tests.py
+
+    def test_can_save_a_POST_request(self):
+        response = self.client.post('/', data={'item_text': 'A new list item'})
+
+        self.assertEqual(Item.objects.count(), 1) #➊
+        new_item = Item.objects.first() #➋
+        self.assertEqual(new_item.text, 'A new list item') #➌
+
+        self.assertIn('A new list item', response.content.decode())
+        self.assertTemplateUsed(response, 'home.html')
+
+➊ 检查是否把一个新 Item 对象存入数据库。objects.count() 是 objects.all().count()
+的简写形式。
+
+➋ objects.first() 等价于 objects.all()[0]。 
+
+➌ 检查待办事项的文本是否正确。
+
+运行测试，会看到一个预期 失败:
+    
+    self.assertEqual(Item.objects.count(), 1)
+    AssertionError: 0 != 1
+
+修改一下视图：
+
+lists/views.py
+
+    from django.shortcuts import render 
+    from lists.models import Item
+
+    def home_page(request): 
+        item = Item()
+        item.text = request.POST.get('item_text', '')
+        item.save()
+
+        return render(request, 'home.html', {
+            'new_item_text': request.POST.get('item_text', ''),
+        })
+
+测试通过。现在可以做些重构:
+
+lists/views.py
+
+    return render(request, 'home.html', {
+        'new_item_text': item.text
+    })
+
+定义一个新测试方法：
+
+lists/tests.py
+
+    class HomePageTest(TestCase): 
+        [...]
+
+        def test_only_saves_items_when_necessary(self): 
+            self.client.get('/') 
+            self.assertEqual(Item.objects.count(), 0)
+
+这个测试得到的是 1 != 0 失败。下面来修正这个问题。
+
+lists/views.py
+
+    def home_page(request):
+        if request.method == 'POST':
+            new_item_text = request.POST['item_text']
+            Item.objects.create(text=new_item_text) 
+        else:
+            new_item_text = ''
+
+        return render(request, 'home.html', { 
+            'new_item_text': new_item_text,
+        })
+
+* 使用一个名为 new_item_text 的变量，其值是 POST 请求中的数据，或者是空字
+符串。
+
+* .objects.create 是创建新 Item 对象的简化方式，无需再调用 .save() 方法。
+
+## 7. 处理完 POST 请求后重定向
+处理完 POST 请求后一定要重定向(https://en.wikipedia.org/ wiki/Post/Redirect/Get)，那么接下来就实现这个功能吧。再次修改针对保存 POST 请求数 据的单元测试，不让它渲染包含待办事项的响应，而是重定向到首页：
+
+lists/tests.py
+
+    def test_can_save_a_POST_request(self):
+        response = self.client.post('/', data={'item_text': 'A new list item'})
+
+        self.assertEqual(Item.objects.count(), 1)
+        new_item = Item.objects.first()
+        self.assertEqual(new_item.text, 'A new list item')
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['location'], '/')
+
+不需要再拿响应中的 .content 属性值和渲染模板得到的结果比较，因此把相应的断言删掉 了。现在，响应是 HTTP 重定向，状态码是 302，让浏览器指向一个新地址。
+
+修改之后运行测试，得到的结果是 200 != 302 错误。
+
+lists/views.py
+
+    from django.shortcuts import redirect, render 
+    from lists.models import Item
+
+    def home_page(request):
+        if request.method == 'POST':
+            Item.objects.create(text=request.POST['item_text']) 
+            return redirect('/')
+
+        return render(request, 'home.html')
+
+现在，测试可以通过了。
+
+
+### 更好的单元测试实践方法:一个测试只测试一件事
+现在视图函数处理完 POST 请求后会重定向，这是习惯做法。
+
+良好的单元测试实践方法要求，一个测试只能测试一件 事。因为这样便于查找问题。如果一个测试中有多个断言，一旦前面的断言导致测试失 败，就无法得知后面的断言情况如何。
+
+lists/tests.py
+
+    def test_can_save_a_POST_request(self):
+        self.client.post('/', data={'item_text': 'A new list item'})
+
+        self.assertEqual(Item.objects.count(), 1)
+        new_item = Item.objects.first()
+        self.assertEqual(new_item.text, 'A new list item')
+
+    def test_redirects_after_POST(self):
+        response = self.client.post('/', data={'item_text': 'A new list item'}) 
+        self.assertEqual(response.status_code, 302) 
+        self.assertEqual(response['location'], '/')
+
+## 8. 在模板中渲染待办事项
+编写一个新单元测试，检查模板是否也能显示 多个待办事项：
+
+lists/tests.py
+
+    class HomePageTest(TestCase): 
+        [...]
+        def test_displays_all_list_items(self): 
+            Item.objects.create(text='itemey 1') 
+            Item.objects.create(text='itemey 2')
+
+            response = self.client.get('/')
+
+            self.assertIn('itemey 1', response.content.decode())
+            self.assertIn('itemey 2', response.content.decode())
+
+这个测试和预期一样会失败:
+
+    AssertionError: 'itemey 1' not found in '<html>\n  <head>\n [...]
+
+Django的模板句法中有一个用于遍历列表的标签，即{% for .. in .. %}。可以按照下面 的方式使用这个标签:
+
+lists/templates/lists/home.html
+
+    <table id="id_list_table">
+        {% for item in items %}
+            <tr><td>1: {{ item.text }}</td></tr>
+        {% endfor %}
+    </table>
+
+只修改模板还不能让测试通过，还要在首页的视图中把待办事项传入模板:
+
+lists/views.py
+
+    def home_page(request):
+        if request.method == 'POST':
+            Item.objects.create(text=request.POST['item_text']) 
+            return redirect('/')
+
+        items = Item.objects.all()
+        return render(request, 'lists/home.html', {'items': items})
+
+    这样单元测试就能通过了。
+
+    运行功能测试，测试失败：
+
+        python3 functional_tests.py
+        [...]
+        AssertionError: 'To-Do' not found in 'OperationalError at /'
+
+## 9. 使用迁移创建生产数据库
+功能测试失败的原因是没有正确设置数据库。为什么在单元测试中一切都运行良好呢？这是因为 Django 为单元测试创建了专用的测试数据库——这是 Django 中 TestCase 所做的神奇事情之一。
+
+我们已经在 models.py 文件和后来创建的迁移文件中告诉 Django 创建数据库所需的一切信 息，为了创建真正的数据库，要使用 Django 中另一个强大的 manage.py 命令——migrate：
+
+    python3 manage.py migrate
+
+使用 Django 模板标签 forloop.counter 让清单显示正确的序号：
+
+lists/templates/lists/home.html
+
+    {% for item in items %}
+        <tr><td>{{ forloop.counter }}: {{ item.text }}</td></tr>
+    {% endfor %}
