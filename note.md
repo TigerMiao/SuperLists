@@ -1272,7 +1272,7 @@ lists/templates/lists/home.html
     git commit -am "Redirect after POST, and show all items in template"
 
 # 六、改进功能测试
-## 6.1 确保功能测试之间相互隔离
+## 1 确保功能测试之间相互隔离
 运行单元测试时，Django 的测试运行程序会自动创建一个全新的测试数据库(和应用真正 使用的数据库不同)，运行每个测试之前都会清空数据库，等所有测试都运行完之后，再 删除这个数据库。但是功能测试目前使用的是应用真正使用的数据库 db.sqlite3。
 
 从 1.4 版开始，Django 提供的一个新类，LiveServerTestCase，它可以代我们完成这 一任务。这个类会自动创建一个测试数据库(跟单元测试一样)，并启动一个开发服务器，让功能测试在其中运行。
@@ -1325,3 +1325,47 @@ functional_tests/tests.py
     git commit # 提交消息举例:"make functional_tests an app, use LiveServerTestCase"
 
 git diff 命令中的 -M 标志很有用，意思是“检测移动”，所以 git 会注意到 functional_tests. py 和 functional_tests/tests.py 是同一个文件，显示更合理的差异。
+
+## 2. 隐式和显式等待
+修改功能测试，把函数 check_for_row_in_list_table 改名为 wait_for_row_in_list_table，然后增加 polling/retry 逻辑：
+
+functional_tests/tests.py
+
+    from selenium.common.exceptions import WebDriverException 
+    
+    MAX_WAIT = 10
+    [...]
+    
+    def wait_for_row_in_list_table(self, row_text): 
+        start_time = time.time()
+        while True:
+            try:
+                table = self.browser.find_element_by_id('id_list_table') 
+                rows = table.find_elements_by_tag_name('tr') 
+                self.assertIn(row_text, [row.text for row in rows]) 
+                return
+            except (AssertionError, WebDriverException) as e: 
+                if time.time() - start_time > MAX_WAIT:
+                    raise e 
+                time.sleep(0.5)
+
+然后，就可以修改方法调用，并删除 time.sleeps 方法：
+
+functional_tests/tests.py
+
+    [...]
+    # When she hits enter, the page updates, and now the page lists 
+    # "1: Buy peacock feathers" as an item in a to-do list table inputbox.send_keys(Keys.ENTER) 
+    self.wait_for_row_in_list_table('1: Buy peacock feathers')
+
+    # There is still a text box inviting her to add another item. She 
+    # enters "Use peacock feathers to make a fly" (Edith is very
+    # methodical)
+    inputbox = self.browser.find_element_by_id('id_new_item') inputbox.send_keys('Use peacock feathers to make a fly') inputbox.send_keys(Keys.ENTER)
+
+    # The page updates again, and now shows both items on her list
+    self.wait_for_row_in_list_table('2: Use peacock feathers to make a fly')
+    self.wait_for_row_in_list_table('1: Buy peacock feathers')
+    [...]
+
+

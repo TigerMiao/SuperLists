@@ -1,7 +1,10 @@
 from django.test import LiveServerTestCase
 from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
+from selenium.common.exceptions import WebDriverException
 import time
+
+MAX_WAIT = 10
 
 class NewVisitorTest(LiveServerTestCase):
 
@@ -11,12 +14,20 @@ class NewVisitorTest(LiveServerTestCase):
     def tearDown(self):
         self.browser.quit()
 
-    def check_for_row_in_list_table(self, row_text):
-        table = self.browser.find_element_by_id('id_list_table')
-        rows = table.find_elements_by_tag_name('tr')
-        self.assertIn(row_text, [row.text for row in rows])
+    def wait_for_row_in_list_table(self, row_text):
+        start_time = time.time()
+        while True:
+            try:
+                table = self.browser.find_element_by_id('id_list_table')
+                rows = table.find_elements_by_tag_name('tr')
+                self.assertIn(row_text, [row.text for row in rows])
+                return
+            except (AssertionError, WebDriverException) as e:
+                if time.time() - start_time > MAX_WAIT:
+                    raise e
+                time.sleep(0.5)
 
-    def test_can_start_a_list_and_retrieve_it_later(self):
+    def test_can_start_a_list_for_one_user(self):
         # 伊迪丝听说有一个很酷的在线代办事项应用
         # 她去看了这个应用的首页
         self.browser.get(self.live_server_url)
@@ -41,9 +52,7 @@ class NewVisitorTest(LiveServerTestCase):
         # 待办事项表格中显示了"1: Buy peacock feathers"
         inputbox.send_keys(Keys.ENTER)
 
-        time.sleep(1)
-
-        self.check_for_row_in_list_table('1: Buy peacock feathers')
+        self.wait_for_row_in_list_table('1: Buy peacock feathers')
 
         # 页面中又显示了一个文本框，可以输入其他的待办事项
         # 她输入了"Use peacock feathers to make a fly"（使用孔雀羽毛做假蝇）
@@ -52,16 +61,47 @@ class NewVisitorTest(LiveServerTestCase):
         inputbox.send_keys('Use peacock feathers to make a fly')
         inputbox.send_keys(Keys.ENTER)
 
-        time.sleep(1)
-
         # 页面再次更新，她的清单中显示了这两个待办事项
-        self.check_for_row_in_list_table('1: Buy peacock feathers')
-        self.check_for_row_in_list_table('2: Use peacock feathers to make a fly')
+        self.wait_for_row_in_list_table('1: Buy peacock feathers')
+        self.wait_for_row_in_list_table('2: Use peacock feathers to make a fly')
 
-        # 伊迪丝想知道这个网站是否会记住她的清单
-        # 她看到网站为她生成了一个唯一的URL
-        # 页面中有一些文字解说这个功能
-        self.fail('Finish the test!')
+    def test_multiple_users_can_start_lists_at_diferent_urls(self):
+        # 埃迪斯开始了一个新的待办清单
+        self.browser.get(self.live_server_url)
+        inputbox = self.browser.find_element_by_id('id_new_item')
+        inputbox.send_keys('Buy peacock feathers')
+        inputbox.send_keys(Keys.ENTER)
+        self.wait_for_row_in_list_table('1: Buy peacock feathers')
 
-        # 她访问那个URL，发现待办事项清单还在
+        # 她注意到她的清单有一个唯一的 URL
+        edith_list_url = self.browser.current_url
+        self.assertRegex(edith_list_url, '/lists/.+')
+
+        # 现在来了一个新用户 Francis，他要访问这个网站
+
+        ## 我们使用了一个新的浏览器会话，以确保没有任何伊迪丝的信息是通过Cookie保存的
+        self.browser.quit()
+        self.browser = webdriver.Firefox()
+
+        # 弗兰西斯访问主页，这里应该没有伊迪丝的清单
+        self.browser.get(self.live_server_url)
+        page_text = self.browser.find_element_by_tag_name('body').text
+        self.assertNotIn('Buy peacock feathers', page_text)
+        self.assertNotIn('make a fly', page_text)
+
+        # 弗兰西斯通过输入一个新的事项开始一个新的清单。他的兴趣比埃迪斯少...
+        inputbox = self.browser.find_element_by_id('id_new_item')
+        inputbox.send_keys('Buy milk')
+        inputbox.send_eys(Keys.ENTER)
+        self.wait_for_row_in_list_table('1: Buy milk')
+
+        # 弗兰西斯获得他自己特有的 URL
+        francis_list_url = self.browser.current_url
+        self.assertRegex(francis_list_url, '/lists/.+')
+        self.assertNotEqual(francis_list_url, edith_list_url)
+
+        # 同样，这里没有埃迪斯清单的痕迹
+        page_text = self.browser.find_element_by_tag_name('body').text
+        self.assertNotIn('Buy peacock feathers', page_text)
+        self.assertIn('Buy milk', page_text)
 
