@@ -92,7 +92,7 @@ class NewVisitorTest(LiveServerTestCase):
         # 弗兰西斯通过输入一个新的事项开始一个新的清单。他的兴趣比埃迪斯少...
         inputbox = self.browser.find_element_by_id('id_new_item')
         inputbox.send_keys('Buy milk')
-        inputbox.send_eys(Keys.ENTER)
+        inputbox.send_keys(Keys.ENTER)
         self.wait_for_row_in_list_table('1: Buy milk')
 
         # 弗兰西斯获得他自己特有的 URL
