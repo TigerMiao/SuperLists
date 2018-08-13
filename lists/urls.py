@@ -18,11 +18,10 @@ Including another URLconf
     re_path('^lists/(\d+)/add_item$', views.add_item, name='add_item')
 '''
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path
 from lists import views
-
 urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('', views.home_page, name='home'),
-    path('lists/', include('lists.urls')),
+    path('new', views.new_list, name='new_list'),
+    path('<list_id>/', views.view_list, name='view_list'),
+    path('<list_id>/add_item', views.add_item, name='add_item'),
 ]
