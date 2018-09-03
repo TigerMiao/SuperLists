@@ -47,6 +47,10 @@ functional_test.py
 
     pip install Django
 
+查看 Django 版本：
+
+    python -m django --version
+
 然后创建名为superlist的项目：
 
     django-admin.py startproject superlists .
@@ -54,7 +58,7 @@ functional_test.py
 ## 4. 安装 Selenium
 Selenium 是浏览器自动化工具，我们要用它来驱动功能测试。
 
-    pip install --update selenium
+    pip install --upgrade selenium
 
 ## 5. 运行功能测试
 首先，运行开发服务器：
@@ -72,7 +76,7 @@ Selenium 是浏览器自动化工具，我们要用它来驱动功能测试。
 
     git init
 
-编辑.gitignoore文件，如下：
+编辑.gitignore文件，如下：
 
     *.pyc
     __pycache__
@@ -1010,8 +1014,9 @@ lists/tests.py
 lists/models.py
 
     from django.db import models
-        class Item(models.Model):
-            pass
+
+    class Item(models.Model):
+        pass
 
 ### 5.1 第一个数据库迁移
 在 Django 中，ORM 的任务是模型化数据库。创建数据库其实是由另一个系统负责的，叫 作“迁移”(migration)。迁移的任务是，根据你对 models.py 文件的改动情况，添加或删 除表和列。
@@ -1287,7 +1292,7 @@ LiveServerTestCase 必须使用 manage.py，由 Django 的测试运行程序运�
     git mv functional_tests.py functional_tests/tests.py
     git status # 显示文件重命名为functional_tests/tests.py，而且新增了__init__.py
 
-现在，运行功能测试不执行 python3 function al_tests.py 命令，而是使用 python3 manage.py test functional_tests 命令。
+现在，运行功能测试不执行 python3 functional_tests.py 命令，而是使用 python3 manage.py test functional_tests 命令。
 
 接下来编辑 functional_tests/tests.py，修改 NewVisitorTest 类，让它使用 LiveServerTestCase：
 
